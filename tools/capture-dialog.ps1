@@ -17,7 +17,8 @@ param(
     [ValidateSet('x64', 'x86')]
     [string]$Arch = 'x64',
     [string]$Output,
-    [int]$Margin = 40
+    [int]$Margin = 40,
+    [switch]$Full
 )
 
 $ErrorActionPreference = 'Stop'
@@ -86,7 +87,7 @@ $BM_CLICK = 0x00F5
 
 # Wait for a visible top-level #32770 window from the harness process.
 $dialogWindow = [IntPtr]::Zero
-for ($i = 0; $i -lt 100 -and $dialogWindow -eq [IntPtr]::Zero; $i++) {
+for ($i = 0; $i -lt 300 -and $dialogWindow -eq [IntPtr]::Zero; $i++) {
     Start-Sleep -Milliseconds 100
     $candidate = [IntPtr]::Zero
     while ($true) {
@@ -111,7 +112,7 @@ $DWMWA_EXTENDED_FRAME_BOUNDS = 9
 $left = $rect.Left - $Margin
 $top = $rect.Top - $Margin
 $width = $rect.Right - $rect.Left + 2 * $Margin
-$height = [Math]::Min($rect.Bottom - $rect.Top, 200) + 2 * $Margin
+$height = $(if ($Full) { $rect.Bottom - $rect.Top } else { [Math]::Min($rect.Bottom - $rect.Top, 200) }) + 2 * $Margin
 
 $bitmap = New-Object System.Drawing.Bitmap $width, $height
 $graphics = [System.Drawing.Graphics]::FromImage($bitmap)

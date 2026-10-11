@@ -30,17 +30,29 @@ To update, open the local mod in the editor, paste the new source and compile ag
 
 For each dialog (Open, Save, Folder Picker) and each architecture:
 
-- [ ] The Favorites Button appears once, immediately left of the caption buttons, matching their height.
-- [ ] The button follows move, resize, maximize/restore, minimize/restore, DPI change and theme change.
+- [x] The Favorites Button appears once, immediately left of the caption buttons, matching their height.
+- [ ] The button follows move, resize, maximize/restore, minimize/restore, DPI change and theme change. *(All but theme change verified.)*
 - [ ] The button looks dimmed when the dialog is inactive and disabled while a child dialog (e.g. overwrite confirmation) is open.
-- [ ] Clicking the button opens the Favorites Menu below it; Esc and clicking elsewhere close it.
-- [ ] Picking a Favorite Navigates: the Current Folder changes, the dialog does not Commit, and the Typed File Name and File Type Filter are unchanged.
+- [x] Clicking the button opens the Favorites Menu below it; Esc closes it. *(Closing by clicking elsewhere not yet checked.)*
+- [x] Picking a Favorite Navigates: the Current Folder changes, the dialog does not Commit, and the Typed File Name and File Type Filter are unchanged.
 - [ ] A Favorite that does not exist leaves the dialog where it was (beep for now).
 - [ ] Dragging the dialog by its title bar works everywhere except on the button.
 - [ ] Disabling the mod with a dialog open removes the button without crashing; the dialog keeps working.
-- [ ] Opening and cancelling many dialogs in a row leaves no duplicate or orphan buttons.
+- [ ] Opening and cancelling many dialogs in a row leaves no duplicate or orphan buttons. *(Two dialogs open at once each had exactly one button.)*
 
 ## Results
 
+Automated runs drove the harness with synthetic mouse and keyboard input and checked screenshots and window geometry.
+
 | Date | Windows build | Windhawk | Program | Arch | Dialog / API | Result |
 | --- | --- | --- | --- | --- | --- | --- |
+| 2026-10-11 | 26300.9550 | 1.7.3 | test-dialogs | x64 | Save / IFileDialog | Pass: Navigated to Downloads; Typed File Name and CSV filter kept; not Committed |
+| 2026-10-11 | 26300.9550 | 1.7.3 | test-dialogs | x64 | Open / IFileDialog | Pass: Navigated to Temp; CSV filter kept |
+| 2026-10-11 | 26300.9550 | 1.7.3 | test-dialogs | x64 | Folder Picker / IFileDialog | Pass: Navigated to Home |
+| 2026-10-11 | 26300.9550 | 1.7.3 | test-dialogs | x64 | Open / GetOpenFileName | Pass: button present; Navigated to Temp; CSV filter kept |
+| 2026-10-11 | 26300.9550 | 1.7.3 | test-dialogs | x64 | Save / GetSaveFileName | Pass: Navigated to Downloads; Typed File Name and CSV filter kept |
+| 2026-10-11 | 26300.9550 | 1.7.3 | test-dialogs | x86 | Save / IFileDialog | Pass: same as x64 |
+| 2026-10-11 | 26300.9550 | 1.7.3 | test-dialogs | x86 | Save / GetSaveFileName | Pass: same as x64; harness logged "Cancelled" after Esc |
+| 2026-10-11 | 26300.9550 | 1.7.3 | test-dialogs | x64 | Save / IFileDialog | Pass: button stays aligned after move, resize, maximize, restore and moving between monitors at 100% and ~175% scale; hidden while minimized |
+
+Known issue: the Favorites Menu uses the light theme even when the dialog is dark.
