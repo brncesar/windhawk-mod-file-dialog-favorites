@@ -37,8 +37,8 @@ For each dialog (Open, Save, Folder Picker) and each architecture:
 - [x] Picking a Favorite Navigates: the Current Folder changes, the dialog does not Commit, and the Typed File Name and File Type Filter are unchanged.
 - [ ] A Favorite that does not exist leaves the dialog where it was (beep for now).
 - [x] Dragging the dialog by its title bar works everywhere except on the button.
-- [ ] Disabling the mod with a dialog open removes the button without crashing; the dialog keeps working. *(Passes in Notepad; VS Code crashed with 0.1.0, see below.)*
-- [ ] Opening and cancelling many dialogs in a row leaves no duplicate or orphan buttons. *(Two dialogs open at once each had exactly one button.)*
+- [x] Disabling the mod with a dialog open removes the button without crashing; the dialog keeps working. *(Notepad; VS Code from 0.1.2.)*
+- [x] Opening and cancelling many dialogs in a row leaves no duplicate or orphan buttons. *(Repeated dialogs in the harness and VS Code; two dialogs open at once each had exactly one button.)*
 
 ## Results
 
@@ -58,7 +58,10 @@ Automated runs drove the harness with synthetic mouse and keyboard input and che
 | 2026-10-12 | 26300.9550 | 1.7.3 | Notepad | x64 | Save | Pass (manual): button present; Navigate works; disabling the mod with the dialog open removes the button, no crash |
 | 2026-10-12 | 26300.9550 | 1.7.3 | Paint | x64 | Save | Pass (manual): button present |
 | 2026-10-12 | 26300.9550 | 1.7.3 | Notepad | x64 | Save + overwrite prompt | Pass (manual): button disabled while the prompt is open |
-| 2026-10-12 | 26300.9550 | 1.7.3 | VS Code (custom inclusion) | x64 | Save As | **Fail (0.1.0)**: button only on the first dialog; disabling the mod crashed VS Code |
+| 2026-10-12 | 26300.9550 | 1.7.3 | VS Code (custom inclusion) | x64 | Save As | **Fail (0.1.0, 0.1.1)**: button only on the first dialog; disabling the mod crashed VS Code (0.1.0) |
+| 2026-10-12 | 26300.9550 | 1.7.3 | test-dialogs | x64 | Save / IFileDialog, new thread | Pass (0.1.2): button on each of three dialogs in a row although comdlg32.dll is freed between them (failed with 0.1.1) |
+| 2026-10-12 | 26300.9550 | 1.7.3 | test-dialogs | x64, x86 | Save / IFileDialog, GetSaveFileName | Pass (0.1.2): regression run; Navigate kept Typed File Name and CSV filter; at ~175% scale |
+| 2026-10-12 | 26300.9550 | 1.7.3 | VS Code (custom inclusion) | x64 | Save As | Pass (0.1.2, manual): button on every dialog; disabling the mod with the dialog open removes the button, no crash |
 
 Known issues:
 
