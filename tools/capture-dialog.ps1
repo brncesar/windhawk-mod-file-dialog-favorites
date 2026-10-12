@@ -12,7 +12,7 @@ without manual screenshots. The dialog is left open.
 pwsh tools\capture-dialog.ps1 -Dialog SaveModern -Output build\save.png
 #>
 param(
-    [ValidateSet('OpenModern', 'SaveModern', 'PickFolderModern', 'OpenLegacy', 'SaveLegacy')]
+    [ValidateSet('OpenModern', 'SaveModern', 'PickFolderModern', 'OpenLegacy', 'SaveLegacy', 'SaveModernThread')]
     [string]$Dialog = 'SaveModern',
     [ValidateSet('x64', 'x86')]
     [string]$Arch = 'x64',
@@ -64,7 +64,7 @@ public static class CaptureNative {
 # Physical pixels, so the capture matches what is on screen at any scale.
 [CaptureNative]::SetProcessDpiAwarenessContext([IntPtr]-4) | Out-Null
 
-$commandIds = @{ OpenModern = 100; SaveModern = 101; PickFolderModern = 102; OpenLegacy = 103; SaveLegacy = 104 }
+$commandIds = @{ OpenModern = 100; SaveModern = 101; PickFolderModern = 102; OpenLegacy = 103; SaveLegacy = 104; SaveModernThread = 105 }
 $title = "File Dialog Favorites test ($Arch)"
 
 $main = [CaptureNative]::FindWindowW('FileDialogFavoritesTestDialogs', $title)

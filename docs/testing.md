@@ -32,12 +32,12 @@ For each dialog (Open, Save, Folder Picker) and each architecture:
 
 - [x] The Favorites Button appears once, immediately left of the caption buttons, matching their height.
 - [ ] The button follows move, resize, maximize/restore, minimize/restore, DPI change and theme change. *(All but theme change verified.)*
-- [ ] The button looks dimmed when the dialog is inactive and disabled while a child dialog (e.g. overwrite confirmation) is open.
+- [ ] The button looks dimmed when the dialog is inactive and disabled while a child dialog (e.g. overwrite confirmation) is open. *(Disabled during overwrite confirmation verified manually; inactive look not yet checked.)*
 - [x] Clicking the button opens the Favorites Menu below it; Esc closes it. *(Closing by clicking elsewhere not yet checked.)*
 - [x] Picking a Favorite Navigates: the Current Folder changes, the dialog does not Commit, and the Typed File Name and File Type Filter are unchanged.
 - [ ] A Favorite that does not exist leaves the dialog where it was (beep for now).
-- [ ] Dragging the dialog by its title bar works everywhere except on the button.
-- [ ] Disabling the mod with a dialog open removes the button without crashing; the dialog keeps working.
+- [x] Dragging the dialog by its title bar works everywhere except on the button.
+- [ ] Disabling the mod with a dialog open removes the button without crashing; the dialog keeps working. *(Passes in Notepad; VS Code crashed with 0.1.0, see below.)*
 - [ ] Opening and cancelling many dialogs in a row leaves no duplicate or orphan buttons. *(Two dialogs open at once each had exactly one button.)*
 
 ## Results
@@ -55,4 +55,14 @@ Automated runs drove the harness with synthetic mouse and keyboard input and che
 | 2026-10-11 | 26300.9550 | 1.7.3 | test-dialogs | x86 | Save / GetSaveFileName | Pass: same as x64; harness logged "Cancelled" after Esc |
 | 2026-10-11 | 26300.9550 | 1.7.3 | test-dialogs | x64 | Save / IFileDialog | Pass: button stays aligned after move, resize, maximize, restore and moving between monitors at 100% and ~175% scale; hidden while minimized |
 
-Known issue: the Favorites Menu uses the light theme even when the dialog is dark.
+| 2026-10-12 | 26300.9550 | 1.7.3 | Notepad | x64 | Save | Pass (manual): button present; Navigate works; disabling the mod with the dialog open removes the button, no crash |
+| 2026-10-12 | 26300.9550 | 1.7.3 | Paint | x64 | Save | Pass (manual): button present |
+| 2026-10-12 | 26300.9550 | 1.7.3 | Notepad | x64 | Save + overwrite prompt | Pass (manual): button disabled while the prompt is open |
+| 2026-10-12 | 26300.9550 | 1.7.3 | VS Code (custom inclusion) | x64 | Save As | **Fail (0.1.0)**: button only on the first dialog; disabling the mod crashed VS Code |
+
+Known issues:
+
+- The Favorites Menu uses the light theme even when the dialog is dark.
+- Re-enabling the mod while a dialog is open does not add a button to that dialog (by design: the mod only reaches dialogs shown after it loads).
+- VS Code, second dialog without button (0.1.0): not reproduced in the harness, including with each dialog on a new thread as Electron does. 0.1.1 logs every Show call and silent attach failures to find the cause.
+- VS Code crash on disable (0.1.0): the crash dumps show threads still inside the `LoadLibraryExW` and `CoCreateInstance` hooks after Windhawk freed the mod DLL. Fixed in 0.1.1 by counting in-flight calls in every hook (pinning the DLL if any) and removing the `LoadLibraryExW` hook once it is no longer needed.

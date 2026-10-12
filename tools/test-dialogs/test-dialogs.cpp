@@ -20,6 +20,7 @@ enum CommandId {
     kPickFolderModern,
     kOpenLegacy,
     kSaveLegacy,
+    kSaveModernThread,
 };
 
 struct ButtonSpec {
@@ -33,6 +34,7 @@ constexpr ButtonSpec kButtons[] = {
     {kPickFolderModern, L"Pick folder (IFileDialog)"},
     {kOpenLegacy, L"Open (GetOpenFileName)"},
     {kSaveLegacy, L"Save (GetSaveFileName)"},
+    {kSaveModernThread, L"Save (IFileDialog, new thread)"},
 };
 
 constexpr COMDLG_FILTERSPEC kFileTypes[] = {
@@ -149,6 +151,15 @@ void RunLegacy(HWND owner, CommandId id) {
     }
 }
 
+// Electron (and so VS Code) shows each File Dialog on a new STA thread that
+// ends when the dialog closes, while the owner window stays responsive.
+DWORD WINAPI DialogThread(void* owner) {
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    RunModern((HWND)owner, kSaveModern);
+    CoUninitialize();
+    return 0;
+}
+
 void RunCommand(HWND owner, CommandId id) {
     for (const ButtonSpec& button : kButtons) {
         if (button.id == id) {
@@ -156,7 +167,12 @@ void RunCommand(HWND owner, CommandId id) {
         }
     }
 
-    if (id == kOpenLegacy || id == kSaveLegacy) {
+    if (id == kSaveModernThread) {
+        HANDLE thread = CreateThread(nullptr, 0, DialogThread, owner, 0, nullptr);
+        if (thread) {
+            CloseHandle(thread);
+        }
+    } else if (id == kOpenLegacy || id == kSaveLegacy) {
         RunLegacy(owner, id);
     } else {
         RunModern(owner, id);
@@ -238,7 +254,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
         case WM_COMMAND:
             if (HIWORD(wParam) == BN_CLICKED && LOWORD(wParam) >= kOpenModern &&
-                LOWORD(wParam) <= kSaveLegacy) {
+                LOWORD(wParam) <= kSaveModernThread) {
                 RunCommand(hwnd, (CommandId)LOWORD(wParam));
             }
             return 0;

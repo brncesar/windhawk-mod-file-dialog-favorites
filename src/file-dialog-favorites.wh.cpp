@@ -2,7 +2,7 @@
 // @id              file-dialog-favorites
 // @name            File Dialog Favorites
 // @description     Adds a favorites button to the title bar of Open/Save dialogs that moves the dialog to a favorite folder
-// @version         0.1.0
+// @version         0.1.1
 // @author          Bruno Cesar
 // @github          https://github.com/brncesar
 // @homepage        https://github.com/brncesar/windhawk-mod-file-dialog-favorites
@@ -95,16 +95,26 @@ https://github.com/brncesar/windhawk-mod-file-dialog-favorites
 // ---------------------------------------------------------------------------
 // Unloading
 //
-// IFileDialog::Show is modal, so a dialog that is open when the mod is
-// disabled has our Show hook on its call stack, and possibly the favorites
-// menu loop too. Windhawk frees the mod DLL right after Wh_ModUninit, so in
-// that case the DLL is pinned (kept loaded until the process exits) and all
-// code that can run after uninit checks g_unloaded first.
+// Windhawk frees the mod DLL right after Wh_ModUninit, even if a thread is
+// still inside one of our hooks: IFileDialog::Show is modal, and in busy
+// processes (e.g. Chromium-based ones) other threads can be blocked inside
+// CoCreateInstance or LoadLibraryExW for a long time. Every hook therefore
+// counts itself in g_activeCalls; if any call is in flight at uninit, the DLL
+// is pinned (kept loaded until the process exits) and all code that can run
+// after uninit checks g_unloaded first.
 // ---------------------------------------------------------------------------
 
 static volatile bool g_unloading;  // Set in Wh_ModBeforeUninit.
 static volatile bool g_unloaded;   // Set in Wh_ModUninit.
+static volatile LONG g_activeCalls;
 static volatile LONG g_activeShows;
+
+struct ActiveCall {
+    ActiveCall() { InterlockedIncrement(&g_activeCalls); }
+    ~ActiveCall() { InterlockedDecrement(&g_activeCalls); }
+    ActiveCall(const ActiveCall&) = delete;
+    ActiveCall& operator=(const ActiveCall&) = delete;
+};
 
 // ---------------------------------------------------------------------------
 // Favorites
@@ -225,6 +235,7 @@ struct DialogState {
     // Set when the button is removed for good (dialog destroyed or mod
     // unloaded), so that it is not attached again.
     bool detached = false;
+    bool attachFailureLogged = false;
 
     bool active = true;
     bool enabled = true;
@@ -805,11 +816,18 @@ static void AttachToDialog(DialogState* state) {
 
     HWND dialogWindow = nullptr;
     IOleWindow* oleWindow = nullptr;
-    if (SUCCEEDED(state->dialog->QueryInterface(IID_PPV_ARGS(&oleWindow)))) {
-        oleWindow->GetWindow(&dialogWindow);
+    HRESULT hr = state->dialog->QueryInterface(IID_PPV_ARGS(&oleWindow));
+    if (SUCCEEDED(hr)) {
+        hr = oleWindow->GetWindow(&dialogWindow);
         oleWindow->Release();
     }
     if (!dialogWindow) {
+        // Expected for events that arrive before the window exists; logged
+        // once per dialog to diagnose dialogs that never get a button.
+        if (!state->attachFailureLogged) {
+            state->attachFailureLogged = true;
+            LOG(L"Dialog window not available yet (0x%08X)", (unsigned)hr);
+        }
         return;
     }
 
@@ -984,10 +1002,13 @@ static HRESULT ShowWithFavorites(IFileDialog* self,
     }
 
     auto* events = new FileDialogEvents(&state);
-    if (FAILED(self->Advise(events, &state.adviseCookie))) {
+    HRESULT adviseResult = self->Advise(events, &state.adviseCookie);
+    if (FAILED(adviseResult)) {
         state.adviseCookie = 0;
     }
     events->Release();
+    LOG(L"Show on thread %u (pickFolders=%d, Advise 0x%08X)",
+        GetCurrentThreadId(), state.pickFolders, (unsigned)adviseResult);
     RegisterDialog(&state);
 
     HRESULT result = original(self, owner);
@@ -1008,6 +1029,7 @@ template <int N>
 struct ShowSlot {
     static Show_t original;
     static HRESULT WINAPI Hook(IFileDialog* self, HWND owner) {
+        ActiveCall activeCall;
         if (g_unloading) {
             return original(self, owner);
         }
@@ -1095,6 +1117,7 @@ static HRESULT WINAPI CoCreateInstance_Hook(REFCLSID clsid,
                                             DWORD context,
                                             REFIID riid,
                                             LPVOID* ppv) {
+    ActiveCall activeCall;
     HRESULT hr = CoCreateInstance_Original(clsid, outer, context, riid, ppv);
     if (SUCCEEDED(hr) && ppv && *ppv && !g_unloading &&
         IsFileDialogClsid(clsid)) {
@@ -1113,6 +1136,7 @@ static HRESULT WINAPI CoCreateInstanceEx_Hook(REFCLSID clsid,
                                               COSERVERINFO* serverInfo,
                                               DWORD count,
                                               MULTI_QI* results) {
+    ActiveCall activeCall;
     HRESULT hr = CoCreateInstanceEx_Original(clsid, outer, context, serverInfo,
                                              count, results);
     if (SUCCEEDED(hr) && results && !g_unloading && IsFileDialogClsid(clsid)) {
@@ -1173,21 +1197,25 @@ static GetFileNameA_t GetOpenFileNameA_Original;
 static GetFileNameA_t GetSaveFileNameA_Original;
 
 static BOOL WINAPI GetOpenFileNameW_Hook(LPOPENFILENAMEW ofn) {
+    ActiveCall activeCall;
     EnsureShowHookedForLegacyApi();
     return GetOpenFileNameW_Original(ofn);
 }
 
 static BOOL WINAPI GetSaveFileNameW_Hook(LPOPENFILENAMEW ofn) {
+    ActiveCall activeCall;
     EnsureShowHookedForLegacyApi();
     return GetSaveFileNameW_Original(ofn);
 }
 
 static BOOL WINAPI GetOpenFileNameA_Hook(LPOPENFILENAMEA ofn) {
+    ActiveCall activeCall;
     EnsureShowHookedForLegacyApi();
     return GetOpenFileNameA_Original(ofn);
 }
 
 static BOOL WINAPI GetSaveFileNameA_Hook(LPOPENFILENAMEA ofn) {
+    ActiveCall activeCall;
     EnsureShowHookedForLegacyApi();
     return GetSaveFileNameA_Original(ofn);
 }
@@ -1198,10 +1226,15 @@ static BOOL WINAPI GetSaveFileNameA_Hook(LPOPENFILENAMEA ofn) {
 
 static bool g_combaseHooked;
 static bool g_comdlg32Hooked;
+// The LoadLibraryExW hook only waits for the two modules above, and it sits
+// on a hot path, so it is removed as soon as both are hooked.
+static void* g_loadLibraryExWTarget;
 static SRWLOCK g_moduleLock = SRWLOCK_INIT;
 
+// applyNow is false only during Wh_ModInit, where Windhawk applies the hook
+// operations itself afterwards.
 static void HookLoadedModules(bool applyNow) {
-    if (g_combaseHooked && g_comdlg32Hooked) {
+    if (g_combaseHooked && g_comdlg32Hooked && !g_loadLibraryExWTarget) {
         return;
     }
 
@@ -1250,6 +1283,14 @@ static void HookLoadedModules(bool applyNow) {
         }
     }
 
+    if (applyNow && g_combaseHooked && g_comdlg32Hooked &&
+        g_loadLibraryExWTarget && !g_unloading) {
+        Wh_RemoveFunctionHook(g_loadLibraryExWTarget);
+        g_loadLibraryExWTarget = nullptr;
+        changed = true;
+        Wh_Log(L"All modules hooked, removing the LoadLibraryExW hook");
+    }
+
     if (changed && applyNow) {
         Wh_ApplyHookOperations();
     }
@@ -1262,6 +1303,7 @@ static LoadLibraryExW_t LoadLibraryExW_Original;
 static HMODULE WINAPI LoadLibraryExW_Hook(LPCWSTR fileName,
                                           HANDLE file,
                                           DWORD flags) {
+    ActiveCall activeCall;
     HMODULE module = LoadLibraryExW_Original(fileName, file, flags);
     if (module && !g_unloading &&
         !(flags & (LOAD_LIBRARY_AS_DATAFILE |
@@ -1287,15 +1329,20 @@ BOOL Wh_ModInit() {
     g_showHookedForLegacyApi = 0;
     g_combaseHooked = false;
     g_comdlg32Hooked = false;
+    g_loadLibraryExWTarget = nullptr;
     g_dialogs.clear();
 
     LoadSettings();
     HookLoadedModules(false);
 
-    if (HMODULE kernelBase = GetModuleHandleW(L"kernelbase.dll")) {
-        if (void* p = (void*)GetProcAddress(kernelBase, "LoadLibraryExW")) {
-            Wh_SetFunctionHook(p, (void*)LoadLibraryExW_Hook,
-                               (void**)&LoadLibraryExW_Original);
+    if (!g_combaseHooked || !g_comdlg32Hooked) {
+        HMODULE kernelBase = GetModuleHandleW(L"kernelbase.dll");
+        void* target = kernelBase
+                           ? (void*)GetProcAddress(kernelBase, "LoadLibraryExW")
+                           : nullptr;
+        if (target && Wh_SetFunctionHook(target, (void*)LoadLibraryExW_Hook,
+                                         (void**)&LoadLibraryExW_Original)) {
+            g_loadLibraryExWTarget = target;
         }
     }
 
@@ -1330,13 +1377,14 @@ void Wh_ModUninit() {
         }
     }
 
-    if (g_activeShows > 0) {
+    if (g_activeCalls > 0) {
         HMODULE module;
         GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
                                GET_MODULE_HANDLE_EX_FLAG_PIN,
                            (LPCWSTR)&Wh_ModUninit, &module);
-        Wh_Log(L"%d dialog(s) still open, keeping the mod loaded",
-               (int)g_activeShows);
+        Wh_Log(L"%d call(s) in flight (%d dialog(s) open), keeping the mod "
+               L"loaded",
+               (int)g_activeCalls, (int)g_activeShows);
     } else {
         if (g_buttonClassName[0]) {
             UnregisterClassW(g_buttonClassName, GetModuleInstance());
