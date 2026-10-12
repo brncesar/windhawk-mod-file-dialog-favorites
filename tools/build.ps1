@@ -67,7 +67,7 @@ function Build-TestDialogs {
             '-municode', '-mwindows', '-static',
             $source,
             '-o', $output,
-            '-lole32', '-lshell32', '-lcomdlg32', '-luuid'
+            '-lole32', '-lshell32', '-luuid'
         )
     }
 }

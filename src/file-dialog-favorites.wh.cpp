@@ -2,7 +2,7 @@
 // @id              file-dialog-favorites
 // @name            File Dialog Favorites
 // @description     Adds a favorites button to the title bar of Open/Save dialogs that moves the dialog to a favorite folder
-// @version         0.1.1
+// @version         0.1.2
 // @author          Bruno Cesar
 // @github          https://github.com/brncesar
 // @homepage        https://github.com/brncesar/windhawk-mod-file-dialog-favorites
@@ -1039,6 +1039,26 @@ struct ShowSlot {
 template <int N>
 Show_t ShowSlot<N>::original;
 
+// The hooked Show and GetOpen/SaveFileName functions live in comdlg32.dll,
+// which COM unloads once the last dialog object is released (Electron, for
+// one, shows each dialog on a thread that ends right after). A reloaded copy
+// has the original code, so the hooks would silently disappear, and Windhawk
+// would later try to unhook code that is no longer there. A reference is
+// held for as long as the mod is loaded.
+static HMODULE g_comdlg32Reference;
+
+static void HoldComdlg32() {
+    if (g_comdlg32Reference) {
+        return;
+    }
+    HMODULE module = nullptr;
+    if (GetModuleHandleExW(0, L"comdlg32.dll", &module) &&
+        InterlockedCompareExchangePointer((void**)&g_comdlg32Reference,
+                                          module, nullptr) != nullptr) {
+        FreeLibrary(module);  // Another thread got there first.
+    }
+}
+
 constexpr int kMaxShowSlots = 4;
 static void* const g_showHooks[kMaxShowSlots] = {
     (void*)ShowSlot<0>::Hook, (void*)ShowSlot<1>::Hook,
@@ -1085,6 +1105,7 @@ static bool HookShowOfObject(IUnknown* object) {
         }
     }
     if (!hooked && !g_unloading && g_showSlotCount < kMaxShowSlots) {
+        HoldComdlg32();
         int slot = g_showSlotCount;
         if (Wh_SetFunctionHook(show, g_showHooks[slot],
                                (void**)g_showOriginals[slot])) {
@@ -1273,6 +1294,7 @@ static void HookLoadedModules(bool applyNow) {
                 {"GetSaveFileNameA", (void*)GetSaveFileNameA_Hook,
                  (void**)&GetSaveFileNameA_Original},
             };
+            HoldComdlg32();
             for (auto& hook : hooks) {
                 if (void* p = (void*)GetProcAddress(comdlg32, hook.name)) {
                     Wh_SetFunctionHook(p, hook.hook, hook.original);
@@ -1330,6 +1352,7 @@ BOOL Wh_ModInit() {
     g_combaseHooked = false;
     g_comdlg32Hooked = false;
     g_loadLibraryExWTarget = nullptr;
+    g_comdlg32Reference = nullptr;
     g_dialogs.clear();
 
     LoadSettings();
@@ -1375,6 +1398,13 @@ void Wh_ModUninit() {
                                  SMTO_ABORTIFHUNG, 2000, &result)) {
             Wh_Log(L"Could not detach from dialog %p", window);
         }
+    }
+
+    // Hooks are already removed at this point (see HoldComdlg32). An open
+    // dialog holds its own reference through its COM object.
+    if (g_comdlg32Reference) {
+        FreeLibrary(g_comdlg32Reference);
+        g_comdlg32Reference = nullptr;
     }
 
     if (g_activeCalls > 0) {

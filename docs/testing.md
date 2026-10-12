@@ -64,5 +64,5 @@ Known issues:
 
 - The Favorites Menu uses the light theme even when the dialog is dark.
 - Re-enabling the mod while a dialog is open does not add a button to that dialog (by design: the mod only reaches dialogs shown after it loads).
-- VS Code, second dialog without button (0.1.0): not reproduced in the harness, including with each dialog on a new thread as Electron does. 0.1.1 logs every Show call and silent attach failures to find the cause.
+- VS Code, second dialog without button (0.1.0, 0.1.1): Electron shows each dialog on a thread that ends right after, and COM then unloads comdlg32.dll. The reloaded copy has the original code, so the Show hook was gone while the mod still considered it installed. Reproduced in the harness ("Save (IFileDialog, new thread)", which now loads comdlg32.dll only on demand and frees unused COM libraries): button on the first dialog only. Fixed in 0.1.2 by holding a reference to comdlg32.dll while the mod is loaded.
 - VS Code crash on disable (0.1.0): the crash dumps show threads still inside the `LoadLibraryExW` and `CoCreateInstance` hooks after Windhawk freed the mod DLL. Fixed in 0.1.1 by counting in-flight calls in every hook (pinning the DLL if any) and removing the `LoadLibraryExW` hook once it is no longer needed.

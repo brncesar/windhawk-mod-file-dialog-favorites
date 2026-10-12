@@ -132,31 +132,48 @@ void RunLegacy(HWND owner, CommandId id) {
     ofn.lpstrDefExt = L"csv";
     ofn.Flags = OFN_EXPLORER | OFN_ENABLESIZING;
 
-    BOOL ok;
-    if (id == kSaveLegacy) {
-        ofn.Flags |= OFN_OVERWRITEPROMPT;
-        ok = GetSaveFileNameW(&ofn);
-    } else {
-        ofn.Flags |= OFN_FILEMUSTEXIST;
-        ok = GetOpenFileNameW(&ofn);
+    // comdlg32.dll is loaded on demand (and then kept), never imported, so
+    // that the new-thread dialog below can see it unloaded as in Electron.
+    HMODULE comdlg32 = LoadLibraryExW(L"comdlg32.dll", nullptr,
+                                      LOAD_LIBRARY_SEARCH_SYSTEM32);
+    using GetFileName_t = BOOL(WINAPI*)(LPOPENFILENAMEW);
+    using CommDlgExtendedError_t = DWORD(WINAPI*)();
+    auto getFileName = (GetFileName_t)(void*)GetProcAddress(
+        comdlg32, id == kSaveLegacy ? "GetSaveFileNameW" : "GetOpenFileNameW");
+    auto commDlgExtendedError = (CommDlgExtendedError_t)(void*)GetProcAddress(
+        comdlg32, "CommDlgExtendedError");
+    if (!getFileName || !commDlgExtendedError) {
+        Log(L"  comdlg32.dll not available");
+        return;
     }
+
+    ofn.Flags |= id == kSaveLegacy ? OFN_OVERWRITEPROMPT : OFN_FILEMUSTEXIST;
+    BOOL ok = getFileName(&ofn);
 
     if (ok) {
         Log(std::wstring(L"  Result: ") + fileName);
         Log(L"  File type index: " + std::to_wstring(ofn.nFilterIndex));
     } else {
-        DWORD error = CommDlgExtendedError();
+        DWORD error = commDlgExtendedError();
         Log(error ? L"  Failed: CommDlgExtendedError " + std::to_wstring(error)
                   : L"  Cancelled");
     }
 }
 
 // Electron (and so VS Code) shows each File Dialog on a new STA thread that
-// ends when the dialog closes, while the owner window stays responsive.
+// ends when the dialog closes, while the owner window stays responsive. COM
+// then unloads comdlg32.dll, which is loaded again for the next dialog; the
+// explicit CoFreeUnusedLibrariesEx makes that happen right away. This only
+// unloads it if the legacy buttons (which keep it loaded) were not used.
 DWORD WINAPI DialogThread(void* owner) {
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
     RunModern((HWND)owner, kSaveModern);
+    // The first call marks unused DLLs, the second frees them.
+    CoFreeUnusedLibrariesEx(0, 0);
+    CoFreeUnusedLibrariesEx(0, 0);
     CoUninitialize();
+    Log(GetModuleHandleW(L"comdlg32.dll") ? L"  comdlg32.dll still loaded"
+                                           : L"  comdlg32.dll unloaded");
     return 0;
 }
 
